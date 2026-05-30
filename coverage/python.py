@@ -260,10 +260,10 @@ class PythonFileReporter(FileReporter):
         return False
 
     def source_token_lines(self) -> TSourceTokenLines:
-        return source_token_lines(self.source())
+        return source_token_lines(self.source(), self.parser._ast_root)
 
     def code_regions(self) -> Iterable[CodeRegion]:
-        return code_regions(self.source())
+        return code_regions(self.source(), self.parser._ast_root)
 
     def code_region_kinds(self) -> Iterable[tuple[str, str]]:
         return [

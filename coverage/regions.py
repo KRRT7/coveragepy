@@ -33,9 +33,9 @@ class RegionFinder:
         self.regions: list[CodeRegion] = []
         self.context: list[Context] = []
 
-    def parse_source(self, source: str) -> None:
+    def parse_source(self, source: str, ast_root: ast.AST | None = None) -> None:
         """Parse `source` and walk the ast to populate the .regions attribute."""
-        self.handle_node(ast.parse(source))
+        self.handle_node(ast_root if ast_root is not None else ast.parse(source))
 
     def fq_node_name(self) -> str:
         """Get the current fully qualified name we're processing."""
@@ -101,7 +101,7 @@ class RegionFinder:
                 ancestor.lines -= lines
 
 
-def code_regions(source: str) -> list[CodeRegion]:
+def code_regions(source: str, ast_root: ast.AST | None = None) -> list[CodeRegion]:
     """Find function and class regions in source code.
 
     Analyzes the code in `source`, and returns a list of :class:`CodeRegion`
@@ -123,5 +123,5 @@ def code_regions(source: str) -> list[CodeRegion]:
 
     """
     rf = RegionFinder()
-    rf.parse_source(source)
+    rf.parse_source(source, ast_root)
     return rf.regions

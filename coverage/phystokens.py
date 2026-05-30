@@ -90,11 +90,11 @@ def _phys_tokens(toks: TokenInfos) -> TokenInfos:
         last_lineno = elineno
 
 
-def find_soft_key_lines(source: str) -> set[TLineNo]:
+def find_soft_key_lines(source: str, ast_root: ast.AST | None = None) -> set[TLineNo]:
     """Helper for finding lines with soft keywords, like match/case lines."""
     soft_key_lines: set[TLineNo] = set()
 
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(ast_root if ast_root is not None else ast.parse(source)):
         # PYVERSION: we use sys.version_info here so that mypy will be ok with
         # us accessing attributes that appeared in those versions.
         if isinstance(node, ast.Match):
@@ -110,7 +110,7 @@ def find_soft_key_lines(source: str) -> set[TLineNo]:
     return soft_key_lines
 
 
-def source_token_lines(source: str) -> TSourceTokenLines:
+def source_token_lines(source: str, ast_root: ast.AST | None = None) -> TSourceTokenLines:
     """Generate a series of lines, one for each line in `source`.
 
     Each line is a list of pairs, each pair is a token::
@@ -133,7 +133,7 @@ def source_token_lines(source: str) -> TSourceTokenLines:
     source = source.expandtabs(8).replace("\r\n", "\n")
     tokgen = generate_tokens(source)
 
-    soft_key_lines = find_soft_key_lines(source)
+    soft_key_lines = find_soft_key_lines(source, ast_root)
 
     for ttype, ttext, (sline, scol), (_, ecol), _ in _phys_tokens(tokgen):
         mark_start = True
