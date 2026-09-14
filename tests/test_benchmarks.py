@@ -39,7 +39,11 @@ from tests.benchmarks.workloads import (
 
 
 class BenchmarkWorkloadsTest:
-    """Exercise the invariants whose absence previously allowed empty work."""
+    """Exercise the invariants whose absence previously allowed empty work.
+
+    Use the suite's selected core so nested collection also works under metacov.
+    The opt-in benchmarks independently exercise each available core.
+    """
 
     @pytest.fixture(autouse=True)
     def clean_generated_modules(self) -> Iterator[None]:
@@ -51,7 +55,7 @@ class BenchmarkWorkloadsTest:
 
     def test_unused_files_are_discovered(self, tmp_path: pathlib.Path) -> None:
         workspace = make_workspace(tmp_path, module_count=1, unused_file_count=3)
-        cov = collect_data(workspace, rounds=1, loops=2)
+        cov = collect_data(workspace, core=testenv.CORE, rounds=1, loops=2)
         cov.save()
         data = cov.get_data()
         unused = [f for f in data.measured_files() if pathlib.Path(f).name.startswith("unused_")]
@@ -61,7 +65,7 @@ class BenchmarkWorkloadsTest:
 
     def test_reporting_inputs_and_incremental_source(self, tmp_path: pathlib.Path) -> None:
         workspace = make_report_workspace(tmp_path, module_count=16)
-        cov = collect_data(workspace, rounds=1, loops=1)
+        cov = collect_data(workspace, core=testenv.CORE, rounds=1, loops=1)
         counts = validate_report_data(cov)
         assert counts["unexecuted_modules"] == 4
         directory = tmp_path / "htmlcov"
@@ -78,7 +82,7 @@ class BenchmarkWorkloadsTest:
 
     def test_incremental_data_changes_without_source_edit(self, tmp_path: pathlib.Path) -> None:
         workspace = make_report_workspace(tmp_path, module_count=16)
-        cov = collect_data(workspace, rounds=1, loops=1)
+        cov = collect_data(workspace, core=testenv.CORE, rounds=1, loops=1)
         directory = tmp_path / "htmlcov"
         cov.html_report(directory=str(directory))
         before = page_stamps(directory)
@@ -94,8 +98,12 @@ class BenchmarkWorkloadsTest:
 
     @pytest.mark.parametrize("explicit", [False, True])
     def test_contexts_change_filtered_data(self, tmp_path: pathlib.Path, explicit: bool) -> None:
+        if not explicit and not testenv.DYN_CONTEXTS:
+            pytest.skip("No dynamic contexts with this core")
         workspace = make_context_workspace(tmp_path, count=10, module_count=8)
-        cov = make_coverage(workspace, dynamic_context=None if explicit else "test_function")
+        cov = make_coverage(
+            workspace, core=testenv.CORE, dynamic_context=None if explicit else "test_function"
+        )
         run_contexts(cov, import_workload(workspace), explicit)
         validate_context_data(cov, 10)
         cov.get_data().close()
