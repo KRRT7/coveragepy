@@ -45,6 +45,7 @@ recursive-include requirements *.in *.txt
 
 recursive-include tests *.py *.tok
 include tests/benchmarks/README.md
+include tests/benchmarks/corpus/manifest.json
 recursive-include tests/gold *
 recursive-include tests js/* qunit/*
 prune tests/eggsrc/build

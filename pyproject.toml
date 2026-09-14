@@ -133,6 +133,7 @@ strict = true
 markers = [
     "benchmark: a performance benchmark, only run by `make bench`",
     "slow: a benchmark slow enough to leave out of the default benchmark run",
+    "real_project: the explicitly prepared, pinned Jinja2 workflow",
 ]
 
 ### pytest.mark.xdist_group() values, and why:

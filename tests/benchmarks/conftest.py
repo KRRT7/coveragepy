@@ -13,24 +13,93 @@ active, pytest-benchmark disables itself but still *executes* every benchmark.
 from __future__ import annotations
 
 import pathlib
-from collections.abc import Iterator
+from collections.abc import Iterator, Callable
+from typing import Any
 
 import pytest
 
 from coverage import Coverage, env
 
-from tests import testenv
 from tests.benchmarks.helpers import (
     LARGE_UNUSED_FILE_COUNT,
     PACKAGE_NAME,
-    REPORT_WORKLOAD_ROUNDS,
-    collect_context_data,
     collect_data,
+    clear_package_modules,
     make_coverage,
     make_multiprocessing_project,
-    make_parallel_data_files,
     make_workspace,
 )
+
+from tests.benchmarks.workloads import (
+    collect_contexts,
+    make_report_workspace,
+    validate_report_data,
+    validate_context_data,
+)
+
+WORKLOAD_VERSION = 2
+
+
+class BenchmarkRunner:
+    """Apply consistent rounds, smoke semantics, and workload identity."""
+
+    def __init__(self, fixture: Any, request: pytest.FixtureRequest) -> None:
+        self.fixture = fixture
+        self.smoke = bool(request.config.getoption("--bench-smoke") or fixture.disabled)
+        if self.smoke:
+            fixture.disabled = True
+        self.rounds = request.config.getoption("--bench-rounds") or (
+            5 if request.node.get_closest_marker("slow") else 10
+        )
+        self.extra_info: dict[str, Any] = fixture.extra_info
+        self.extra_info.update(workload_version=WORKLOAD_VERSION, smoke=self.smoke)
+        # Prevent accidental comparison against the original workload under the same id.
+        fixture.name += f"[workload-v{WORKLOAD_VERSION}]"
+        fixture.fullname += f"[workload-v{WORKLOAD_VERSION}]"
+
+    def __call__(self, function_to_benchmark: Callable[..., Any], /) -> Any:
+        return self.fixture(function_to_benchmark)
+
+    def pedantic(
+        self,
+        target: Callable[..., Any],
+        args: tuple[Any, ...] = (),
+        kwargs: dict[str, Any] | None = None,
+        setup: Callable[[], Any] | None = None,
+        teardown: Callable[..., Any] | None = None,
+    ) -> Any:
+        """Control samples while keeping preparation and assertions untimed."""
+        if self.smoke:
+            if setup:
+                prepared = setup()
+                if prepared is not None:
+                    args, kwargs = prepared
+            try:
+                return self.fixture(lambda: target(*args, **(kwargs or {})))
+            finally:
+                if teardown:
+                    teardown(*args, **(kwargs or {}))
+        return self.fixture.pedantic(
+            target,
+            args=args,
+            kwargs=kwargs,
+            setup=setup,
+            teardown=teardown,
+            rounds=self.rounds,
+            warmup_rounds=1,
+            iterations=1,
+        )
+
+
+@pytest.fixture(name="bench")
+def controlled_benchmark(benchmark: Any, request: pytest.FixtureRequest) -> BenchmarkRunner:
+    """Wrap the plugin fixture without timing setup or workload assertions."""
+    if request.config.getoption("numprocesses", default=0):
+        pytest.fail("Benchmarks require -n0; xdist disables timing.")
+    rounds = request.config.getoption("--bench-rounds")
+    if rounds is not None and rounds < 1:
+        pytest.fail("--bench-rounds must be positive")
+    return BenchmarkRunner(benchmark, request)
 
 
 def pytest_ignore_collect(collection_path: pathlib.Path, config: pytest.Config) -> bool | None:
@@ -48,6 +117,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
     """
     if config.getoption("--benchmarks"):
+        if not config.getoption("--bench-real"):
+            for item in items:
+                if item.get_closest_marker("real_project"):
+                    item.add_marker(
+                        pytest.mark.skip(reason="Use make bench-prepare, then make bench-real")
+                    )
         return
     here = pathlib.Path(__file__).parent
     keeping: list[pytest.Item] = []
@@ -57,20 +132,6 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     if dropping:
         config.hook.pytest_deselected(items=dropping)
         items[:] = keeping
-
-
-def assert_core(cov: Coverage, core: str) -> None:
-    """Fail loudly if coverage.py quietly fell back to a different core.
-
-    Mislabeled numbers are worse than missing ones, and the "no-sysmon" warning
-    that would otherwise tell us is silenced by tests/conftest.py.
-
-    """
-    collector = cov._collector
-    assert collector is not None
-    assert collector.tracer_name() == testenv.TRACER_CLASSES[core], (
-        f"Asked for core={core!r}, got {collector.tracer_name()}"
-    )
 
 
 @pytest.fixture(scope="session", name="bench_ws")
@@ -94,15 +155,6 @@ def unused_workspace(tmp_path_factory: pytest.TempPathFactory) -> pathlib.Path:
     )
 
 
-@pytest.fixture(scope="session", name="combine_ws")
-def combine_workspace(tmp_path_factory: pytest.TempPathFactory) -> pathlib.Path:
-    """A workspace holding many parallel data files, ready to be combined."""
-    workspace = tmp_path_factory.mktemp("combine_ws")
-    make_parallel_data_files(workspace, branch=True, subdir="combine_arcs")
-    make_parallel_data_files(workspace, branch=False, subdir="combine_lines")
-    return workspace
-
-
 @pytest.fixture(scope="session", name="mproc_ws")
 def mproc_workspace(tmp_path_factory: pytest.TempPathFactory) -> pathlib.Path:
     """A workspace set up to be measured across multiprocessing workers."""
@@ -118,14 +170,15 @@ def mproc_workspace(tmp_path_factory: pytest.TempPathFactory) -> pathlib.Path:
 @pytest.fixture(scope="session", name="measured_ws")
 def measured_workspace(tmp_path_factory: pytest.TempPathFactory) -> pathlib.Path:
     """A synthetic project that has already been measured, for reporting."""
-    workspace = make_workspace(tmp_path_factory.mktemp("measured_ws"))
+    workspace = make_report_workspace(tmp_path_factory.mktemp("measured_ws"))
     measured = collect_data(
         workspace,
         core="pytrace",
         branch=True,
-        rounds=REPORT_WORKLOAD_ROUNDS,
+        rounds=1,
     )
     measured.save()
+    validate_report_data(measured)
     return workspace
 
 
@@ -136,7 +189,7 @@ def measured_large_workspace(large_ws: pathlib.Path) -> pathlib.Path:
         large_ws,
         core="pytrace",
         branch=True,
-        rounds=REPORT_WORKLOAD_ROUNDS,
+        rounds=1,
         loops=40,
     )
     measured.save()
@@ -146,9 +199,9 @@ def measured_large_workspace(large_ws: pathlib.Path) -> pathlib.Path:
 @pytest.fixture(scope="session", name="measured_contexts_ws")
 def measured_contexts_workspace(tmp_path_factory: pytest.TempPathFactory) -> pathlib.Path:
     """A synthetic project measured with dynamic contexts turned on."""
-    workspace = make_workspace(tmp_path_factory.mktemp("contexts_ws"))
-    measured = collect_context_data(workspace)
-    measured.save()
+    workspace = tmp_path_factory.mktemp("contexts_ws")
+    measured = collect_contexts(workspace)
+    validate_context_data(measured, 500)
     return workspace
 
 
@@ -214,4 +267,17 @@ def no_test_harness_influence() -> Iterator[None]:
         pytest.skip("Benchmarks measure the wrong thing under COVERAGE_TESTING")
     if env.METACOV:
         pytest.skip("Benchmarks measure the wrong thing under metacov")
-    yield
+    try:
+        yield
+    finally:
+        clear_package_modules()
+
+
+@pytest.fixture(scope="session", name="many_ws")
+def many_workspace(tmp_path_factory: pytest.TempPathFactory) -> pathlib.Path:
+    """A larger project for whole-report scaling and peak memory."""
+    workspace = make_report_workspace(tmp_path_factory.mktemp("many_ws"), module_count=400)
+    measured = collect_data(workspace, rounds=1, loops=1)
+    measured.save()
+    validate_report_data(measured)
+    return workspace

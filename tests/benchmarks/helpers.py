@@ -20,7 +20,6 @@ from types import ModuleType
 from typing import Any, Protocol
 
 from coverage import Coverage
-from coverage.data import CoverageData
 
 
 class Benchmark(Protocol):
@@ -33,6 +32,8 @@ class Benchmark(Protocol):
 
     """
 
+    extra_info: dict[str, Any]
+
     def __call__(self, function_to_benchmark: Callable[..., Any], /) -> Any: ...
 
     def pedantic(
@@ -42,9 +43,6 @@ class Benchmark(Protocol):
         kwargs: dict[str, Any] | None = None,
         setup: Callable[[], Any] | None = None,
         teardown: Callable[..., Any] | None = None,
-        rounds: int = 1,
-        warmup_rounds: int = 0,
-        iterations: int = 1,
     ) -> Any:
         """Time `target`, re-running `setup` untimed before each round."""
 
@@ -58,8 +56,6 @@ WORKLOAD_ROUNDS = 20
 REPORT_WORKLOAD_ROUNDS = 28
 LARGE_FUNCTION_COUNT = 320
 LARGE_UNUSED_FILE_COUNT = 800
-COMBINE_FILE_COUNT = 48
-COMBINE_CONTEXT_COUNT = 24
 MULTIPROC_WORKERS = 8
 MULTIPROC_TASKS = 32
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -261,6 +257,7 @@ def make_workspace(
     if unused_file_count:
         extra = pkg / "unused_tree"
         extra.mkdir()
+        (extra / "__init__.py").write_text("", encoding="utf-8")
         for idx in range(unused_file_count):
             source = extra / f"unused_{idx:04d}.py"
             source.write_text(
@@ -366,69 +363,6 @@ def collect_data(
     return cov
 
 
-def collect_context_data(workspace: pathlib.Path, *, core: str = "pytrace") -> Coverage:
-    """Collect data using dynamic contexts."""
-    measured = make_coverage(
-        workspace,
-        core=core,
-        branch=True,
-        data_suffix="contexts",
-        dynamic_context="test_function",
-    )
-    workload = import_workload(workspace)
-    measured.start()
-    try:
-        workload.run_contexts()
-    finally:
-        measured.stop()
-    clear_package_modules()
-    return measured
-
-
-def make_parallel_data_files(
-    workspace: pathlib.Path,
-    *,
-    file_count: int = COMBINE_FILE_COUNT,
-    context_count: int = COMBINE_CONTEXT_COUNT,
-    branch: bool = True,
-    subdir: str | None = None,
-) -> tuple[str, list[str]]:
-    """Create many coverage data files for combine benchmarks."""
-    if subdir is None:
-        subdir = "combine_arcs" if branch else "combine_lines"
-    data_root = workspace / subdir
-    data_root.mkdir()
-    base_name = str(data_root / ".coverage")
-    file_names = [f"{PACKAGE_NAME}/mod_{idx:03d}.py" for idx in range(24)]
-    paths = []
-
-    for data_idx in range(file_count):
-        data = CoverageData(basename=base_name, suffix=f"part{data_idx:03d}")
-        for ctx_idx in range(context_count):
-            data.set_context(f"ctx_{ctx_idx:03d}")
-            if branch:
-                arc_data = {}
-                for file_idx, filename in enumerate(file_names):
-                    start = 10 * (ctx_idx + 1) + data_idx + file_idx
-                    arc_data[filename] = {
-                        (-start, start),
-                        (start, start + 1),
-                        (start + 1, start + 3),
-                        (start + 1, start + 4),
-                    }
-                data.add_arcs(arc_data)
-            else:
-                line_data = {}
-                for file_idx, filename in enumerate(file_names):
-                    start = 10 * (ctx_idx + 1) + data_idx + file_idx
-                    line_data[filename] = {start, start + 1, start + 2, start + 3}
-                data.add_lines(line_data)
-        data.write()
-        paths.append(data.data_filename())
-
-    return base_name, paths
-
-
 def fresh_html_dir(workspace: pathlib.Path) -> pathlib.Path:
     """Create an empty HTML output directory.
 
@@ -458,6 +392,7 @@ def make_multiprocessing_project(
                 "branch = true",
                 "parallel = true",
                 "concurrency = multiprocessing",
+                "core = ctrace",
                 f"data_file = {workspace / '.coverage.mproc'}",
                 f"source_dirs = {workspace / PACKAGE_NAME}",
                 "",
@@ -473,12 +408,26 @@ def make_multiprocessing_project(
                 "import multiprocessing",
                 f"from {PACKAGE_NAME} import workload",
                 "",
+                "def initialize(barrier):",
+                "    global ready",
+                "    ready = barrier",
+                "",
                 "def worker(seed: int) -> int:",
+                f"    if seed < {workers}:",
+                "        ready.wait(timeout=60)",
                 "    return workload.main(rounds=4 + (seed % 3), loops=18 + (seed % 5))",
                 "",
                 "def main() -> int:",
-                f"    with multiprocessing.Pool({workers}) as pool:",
-                f"        values = pool.map(worker, range({tasks}))",
+                f"    barrier = multiprocessing.Barrier({workers})",
+                f"    pool = multiprocessing.Pool({workers}, initializer=initialize, initargs=(barrier,))",
+                "    try:",
+                f"        values = pool.map(worker, range({tasks}), chunksize=1)",
+                "        pool.close()",
+                "    except BaseException:",
+                "        pool.terminate()",
+                "        raise",
+                "    finally:",
+                "        pool.join()",
                 "    return sum(values)",
                 "",
                 'if __name__ == "__main__":',
@@ -501,10 +450,12 @@ def subprocess_env() -> dict[str, str]:
 
     """
     env = os.environ.copy()
-    for name in ["COVERAGE_PROCESS_START", "COVERAGE_TESTING", "COVERAGE_CORE", "COVERAGE_FILE"]:
-        env.pop(name, None)
+    for name in list(env):
+        if name.startswith(("COVERAGE_", "COV_CORE_", "PYTEST_")):
+            env.pop(name)
     # So that `python -m coverage` finds this checkout even if it isn't installed.
-    env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(REPO_ROOT), env.get("PYTHONPATH")]))
+    env["PYTHONPATH"] = str(REPO_ROOT)
+    env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     return env
 
 
@@ -514,11 +465,26 @@ def run_coverage_subprocess(
     env: dict[str, str],
 ) -> None:
     """Run `python -m coverage ...` inside `workspace` with `env`."""
-    subprocess.run(
+    run_subprocess(
         [sys.executable, "-m", "coverage", *args],
+        workspace,
+        env,
+    )
+
+
+def run_subprocess(args: list[str], workspace: pathlib.Path, env: dict[str, str]) -> str:
+    """Run a child, keeping its diagnostics available if it fails."""
+    result = subprocess.run(
+        args,
         cwd=workspace,
         env=env,
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        check=False,
+        text=True,
+        encoding="utf-8",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=180,
     )
+    if result.returncode:
+        raise RuntimeError(f"Command failed ({result.returncode}): {args!r}\n{result.stdout}")
+    return result.stdout
