@@ -55,7 +55,7 @@ jobs:
               - "**.c"
               - "tests/benchmarks/**"
               - ".github/workflows/benchmarks.yml"
-              - "requirements/*.pip"
+              - "requirements/*.txt"
 
   benchmarks:
     name: "Run the benchmarks"
@@ -81,7 +81,7 @@ jobs:
       - name: "Install dependencies"
         run: |
           set -xe
-          python -m pip install -r requirements/pytest.pip
+          python -m pip install -r requirements/pytest.txt
           # An editable install builds the C extension in place. Without it,
           # every ctrace benchmark would silently skip.
           python -m pip install -e .

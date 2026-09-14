@@ -39,8 +39,9 @@ Three things about that command line are not optional:
 - **`-m benchmark`** overrides the `-m "not benchmark"` in `addopts`.
 
 `make bench` also passes `-m "benchmark and not slow"`, which leaves out the
-multiprocessing benchmarks.  They spawn 8 interpreters 32 times and mostly
-measure process start-up.  Run them with `-m "benchmark and slow"`.
+multiprocessing benchmarks.  Each round creates a pool of 8 workers to process
+32 tasks, and each benchmark runs for two rounds.  These measurements include
+process start-up.  Run them with `-m "benchmark and slow"`.
 
 ## Don't run them through igor
 
