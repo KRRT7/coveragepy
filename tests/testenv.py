@@ -55,4 +55,4 @@ HAVE_SYSMON = env.PYBEHAVIOR.pep669
 
 # Can we use Hypothesis?
 # As of 6.156.0, PyPy 3.10 is no longer supported.
-USE_HYPOTHESIS = env.PYVERSION >= (3, 11) or env.CPYTHON
+USE_HYPOTHESIS = env.CPYTHON or (env.PYVERSION[:2] == (3, 11))
