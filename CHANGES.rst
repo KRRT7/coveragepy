@@ -23,7 +23,8 @@ upgrading your version of coverage.py.
 Unreleased
 ----------
 
-Nothing yet.
+- In an abundance of caution, prevent forged SQLite journal files from being
+  able to delete files they shouldn't.
 
 
 .. start-releases
