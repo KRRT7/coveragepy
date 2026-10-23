@@ -75,6 +75,7 @@ class SqliteDb:
         self,
         filename: str,
         debug: TDebugCtl,
+        *,
         no_disk: bool = False,
         read_only: bool = False,
     ) -> None:

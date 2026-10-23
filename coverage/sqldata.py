@@ -331,8 +331,8 @@ class CoverageData:
         self._dbs[threading.get_ident()] = SqliteDb(
             self._filename,
             self._debug,
-            self._no_disk,
-            self._read_only,
+            no_disk=self._no_disk,
+            read_only=self._read_only,
         )
         self._read_db()
 
@@ -472,7 +472,9 @@ class CoverageData:
                 f"Unrecognized serialization: {data[:40]!r} (head of {len(data)} bytes)",
             )
         script = zlib.decompress(data[1:]).decode("utf-8")
-        self._dbs[threading.get_ident()] = db = SqliteDb(self._filename, self._debug, self._no_disk)
+        self._dbs[threading.get_ident()] = db = SqliteDb(
+            self._filename, self._debug, no_disk=self._no_disk
+        )
         with db:
             db.executescript(script)
         self._read_db()
