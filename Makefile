@@ -166,7 +166,7 @@ diff_upgrade:				#- Summarize the last `make upgrade`.
 	@#	+bashlex==0.17
 	@#	-build==0.9.0
 	@#	+build==0.10.0
-	@git diff -U0 | grep -v '^@' | grep == | sort -k1.2,1.99 -k1.1,1.1r -u -V
+	@git diff -U0 $(since) | grep -v '^@' | grep == | sort -k1.2,1.99 -k1.1,1.1r -u -V
 
 
 ### Pre-builds for prepping the code
