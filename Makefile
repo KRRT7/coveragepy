@@ -27,7 +27,7 @@ ifdef HAS_UV
 	INSTALL_R := uv pip sync
 	UNINSTALL := uv pip uninstall
 else
-	VENV := python -m venv .venv
+	VENV := python3.11 -m venv .venv
 	INSTALL := python -m pip install
 	INSTALL_R := python -m pip install -r
 	UNINSTALL := python -m pip uninstall -y
