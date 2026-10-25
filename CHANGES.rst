@@ -30,6 +30,10 @@ Unreleased
   deleted, but the pages next to it still linked to it. Now a page is also
   rewritten when its neighbors change.
 
+- Fix: the HTML report escaped file names twice, so a name with ``&``, ``<``,
+  or quotes in it was shown with entities like ``&amp;``. Now they are properly
+  escaped only once.
+
 - In an abundance of caution, prevent forged SQLite journal files from deleting
   files they shouldn't.
 
@@ -95,10 +99,6 @@ Version 7.17.0 — 2026-10-22
     containing a newline sent the glob-to-regex translation into an infinite
     loop, hanging the process. Newlines in patterns are now handled like any
     other character.
-
-  - The HTML report's index pages escaped file names twice, so a name with
-    ``&``, ``<``, or quotes in it was shown with entities like ``&amp;``. Now
-    they are escaped once.
 
 - Fixes in the implementation of the C tracer:
 
