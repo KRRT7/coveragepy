@@ -98,21 +98,24 @@ def find_soft_key_lines(source: str) -> set[TLineNo]:
                 return set()
 
     soft_key_lines: set[TLineNo] = set()
-
     for node in ast.walk(ast.parse(source)):
-        # PYVERSION: we use sys.version_info here so that mypy will be ok with
-        # us accessing attributes that appeared in those versions.
-        if isinstance(node, ast.Match):
-            soft_key_lines.add(node.lineno)
-            for case in node.cases:
-                soft_key_lines.add(case.pattern.lineno)
-        elif sys.version_info >= (3, 12) and isinstance(node, ast.TypeAlias):
-            soft_key_lines.add(node.lineno)
-        elif sys.version_info >= (3, 15) and isinstance(node, (ast.Import, ast.ImportFrom)):
-            if node.is_lazy:
-                soft_key_lines.add(node.lineno)
-
+        add_soft_key_lines(node, soft_key_lines)
     return soft_key_lines
+
+
+def add_soft_key_lines(node: ast.AST, soft_key_lines: set[TLineNo]) -> None:
+    """Add to `soft_key_lines` any lines in `node` that use soft keywords."""
+    # PYVERSION: we use sys.version_info here so that mypy will be ok with
+    # us accessing attributes that appeared in those versions.
+    if isinstance(node, ast.Match):
+        soft_key_lines.add(node.lineno)
+        for case in node.cases:
+            soft_key_lines.add(case.pattern.lineno)
+    elif sys.version_info >= (3, 12) and isinstance(node, ast.TypeAlias):
+        soft_key_lines.add(node.lineno)
+    elif sys.version_info >= (3, 15) and isinstance(node, (ast.Import, ast.ImportFrom)):
+        if node.is_lazy:
+            soft_key_lines.add(node.lineno)
 
 
 def source_token_lines(

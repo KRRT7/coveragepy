@@ -188,7 +188,6 @@ class PythonFileReporter(FileReporter):
             self._parser = PythonParser(
                 filename=self.filename,
                 exclude=self.coverage._exclude_regex("exclude"),
-                retain_ast=True,
             )
             self._parser.parse_source()
         return self._parser
@@ -261,14 +260,18 @@ class PythonFileReporter(FileReporter):
         return False
 
     def source_token_lines(self) -> TSourceTokenLines:
-        return source_token_lines(self.source(), soft_key_lines=self.parser.soft_key_lines)
+        # Reuse the parser's soft keyword lines if we've already parsed.
+        soft_key_lines = self._parser.soft_key_lines if self._parser else None
+        return source_token_lines(self.source(), soft_key_lines=soft_key_lines)
 
     def code_regions(self) -> Iterable[CodeRegion]:
         if self._code_regions is None:
             if self._parser is None:
                 self._code_regions = code_regions(self.source())
             else:
-                self._code_regions = self.parser.code_regions()
+                # Reuse the parser's AST, then release it: we've derived
+                # everything we need from it.
+                self._code_regions = self._parser.code_regions()
                 self._parser.release_ast()
         return self._code_regions
 

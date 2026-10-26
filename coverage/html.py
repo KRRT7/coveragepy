@@ -375,8 +375,8 @@ class HtmlReporter:
             have_data = True
             ftr = FileToReport(fr, analysis)
             if self.should_report(analysis, self.index_pages["file"]):
-                # Find regions while this file's parser still has its AST,
-                # then release the AST before retaining the report list.
+                # Find regions now, reusing the parser's AST, which lets the
+                # AST be released before we hold this file in the report list.
                 ftr.fr.code_regions()
                 files_to_report.append(ftr)
             else:
