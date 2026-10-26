@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import io
 import sys
 from typing import IO, TYPE_CHECKING
 
@@ -200,20 +199,15 @@ class LcovReporter:
         outfile = outfile or sys.stdout
 
         # File records are sorted by the _relative_ filename, not the full path.
-        # Render each record as we go, so we don't hold on to the large file
-        # reporters and analyses.  The sort is stable, so equal relative names
-        # stay in full path order.
-        records = []
-        for fr, analysis in get_analysis_to_report(self.coverage, morfs):
+        # Getting the files in that order lets us write each record as we go,
+        # without holding on to anything for the files we're done with.
+        for fr, analysis in get_analysis_to_report(
+            self.coverage,
+            morfs,
+            sort_key=lambda fr: fr.relative_filename(),
+        ):
             self.total += analysis.numbers
-            fname = fr.relative_filename()
-            buf = io.StringIO()
-            self.lcov_file(fname, fr, analysis, buf)
-            records.append((fname, buf.getvalue()))
-        records.sort(key=lambda r: r[0])
-
-        for _, record in records:
-            outfile.write(record)
+            self.lcov_file(fr.relative_filename(), fr, analysis, outfile)
 
         return self.total.n_statements and self.total.pc_covered
 
