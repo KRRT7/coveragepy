@@ -10,6 +10,8 @@ http://aosabook.org/en/500L/a-template-engine.html
 
 # Coincidentally named the same as http://code.activestate.com/recipes/496702/
 
+# pragma: enforce 100% coverage
+
 from __future__ import annotations
 
 import re
@@ -20,13 +22,9 @@ from typing import Any, NoReturn, cast
 class TempliteSyntaxError(ValueError):
     """Raised when a template has a syntax error."""
 
-    pass
-
 
 class TempliteValueError(ValueError):
     """Raised when an expression won't evaluate in a template."""
-
-    pass
 
 
 class CodeBuilder:

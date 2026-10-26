@@ -17,7 +17,6 @@ from coverage import env
 from coverage.exceptions import NoSource, NotPython
 from coverage.parser import PythonParser, is_constant_test_expr, multiline_map_from_text
 from coverage.types import TLineNo
-
 from tests.coveragetest import CoverageTest
 from tests.helpers import arcz_to_arcs
 
@@ -188,6 +187,25 @@ class PythonParserTest(PythonParserTestBase):
 
         one_nine = set(range(1, 10))
         assert parser.statements == one_nine
+        assert parser.exit_counts() == dict.fromkeys(one_nine, 1)
+
+    def test_deeply_nested_context_managers(self) -> None:
+        # https://github.com/coveragepy/coveragepy/issues/1987
+        parser = self.parse_text("""\
+            a = 1
+            with suppress(ValueError):
+                with suppress(ValueError):
+                    with suppress(ValueError):
+                        with suppress(ValueError):
+                            x = 6
+                    with suppress(ValueError): x = 7
+            with suppress(ValueError): x = 8
+            a = 9
+            """)
+
+        one_nine = set(range(1, 10))
+        assert parser.statements == one_nine
+        assert parser.arcs() == set(arcz_to_arcs("12 23 34 45 56 67 78 89 9."))
         assert parser.exit_counts() == dict.fromkeys(one_nine, 1)
 
     def test_module_docstrings(self) -> None:
@@ -1103,6 +1121,69 @@ class ExclusionParserTest(PythonParserTestBase):
         assert parser.lines_matching(regex) == {2, 3, 4, 5, 6, 7, 8, 9, 10}
         assert parser.raw_statements == {1, 3, 4, 5, 6, 8, 9}
         assert parser.statements == {1}
+
+    def test_exclude_irrefutable_case_with_excluded_body(self) -> None:
+        # https://github.com/coveragepy/coveragepy/issues/1563
+        # An irrefutable `case` (`case _:` or a bare capture) is the `match`
+        # equivalent of an `else:` clause.  When its whole body is excluded,
+        # the `case` line is excluded too.  A refutable case is left alone,
+        # the same way an `elif` line is still reported.
+        regex = "raise NotImplementedError"
+        parser = self.parse_text(
+            """\
+            match command:
+                case "go":
+                    move()
+                case "stop":
+                    raise NotImplementedError
+                case _:
+                    raise NotImplementedError
+            """,
+            regex,
+        )
+        assert parser.lines_matching(regex) == {5, 7}
+        assert parser.raw_statements == {1, 2, 3, 4, 5, 6, 7}
+        # Line 6 (`case _:`) is excluded with its body.  The refutable
+        # `case "stop":` on line 4 is still reported, like an `elif`.
+        assert parser.statements == {1, 2, 3, 4}
+
+    def test_exclude_capture_case_with_excluded_body(self) -> None:
+        # https://github.com/coveragepy/coveragepy/issues/1563
+        # A bare-capture pattern (`case other:`) is also irrefutable.
+        regex = "# nope"
+        parser = self.parse_text(
+            """\
+            match command:
+                case "go":
+                    move()
+                case other:
+                    log(other)   # nope
+            """,
+            regex,
+        )
+        assert parser.lines_matching(regex) == {5}
+        assert parser.raw_statements == {1, 2, 3, 4, 5}
+        assert parser.statements == {1, 2, 3}
+
+    def test_no_exclude_case_with_partly_excluded_body(self) -> None:
+        # https://github.com/coveragepy/coveragepy/issues/1563
+        # The `case` line is only excluded when its entire body is excluded.
+        regex = "# nope"
+        parser = self.parse_text(
+            """\
+            match command:
+                case "go":
+                    move()
+                case _:
+                    keep_me()
+                    skip_me()   # nope
+            """,
+            regex,
+        )
+        assert parser.lines_matching(regex) == {6}
+        assert parser.raw_statements == {1, 2, 3, 4, 5, 6}
+        # `case _:` (line 4) stays reported: line 5 in its body is not excluded.
+        assert parser.statements == {1, 2, 3, 4, 5}
 
 
 class ParserMissingArcDescriptionTest(PythonParserTestBase):
