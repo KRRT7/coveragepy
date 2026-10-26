@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import sys
 from typing import IO, TYPE_CHECKING
 
@@ -198,18 +199,21 @@ class LcovReporter:
         self.coverage.get_data()
         outfile = outfile or sys.stdout
 
-        # ensure file records are sorted by the _relative_ filename, not the full path
-        to_report = []
+        # File records are sorted by the _relative_ filename, not the full path.
+        # Render each record as we go, so we don't hold on to the large file
+        # reporters and analyses.  The sort is stable, so equal relative names
+        # stay in full path order.
+        records = []
         for fr, analysis in get_analysis_to_report(self.coverage, morfs):
-            # Find regions now, reusing the parser's AST, which lets the AST
-            # be released before we hold this file in the report list.
-            fr.code_regions()
-            to_report.append((fr.relative_filename(), fr, analysis))
-        to_report.sort()
-
-        for fname, fr, analysis in to_report:
             self.total += analysis.numbers
-            self.lcov_file(fname, fr, analysis, outfile)
+            fname = fr.relative_filename()
+            buf = io.StringIO()
+            self.lcov_file(fname, fr, analysis, buf)
+            records.append((fname, buf.getvalue()))
+        records.sort(key=lambda r: r[0])
+
+        for _, record in records:
+            outfile.write(record)
 
         return self.total.n_statements and self.total.pc_covered
 

@@ -172,7 +172,6 @@ class PythonFileReporter(FileReporter):
 
         self._source: str | None = None
         self._parser: PythonParser | None = None
-        self._code_regions: list[CodeRegion] | None = None
 
     def __repr__(self) -> str:
         return f"<PythonFileReporter {self.filename!r}>"
@@ -265,15 +264,13 @@ class PythonFileReporter(FileReporter):
         return source_token_lines(self.source(), soft_key_lines=soft_key_lines)
 
     def code_regions(self) -> Iterable[CodeRegion]:
-        if self._code_regions is None:
-            if self._parser is None:
-                self._code_regions = code_regions(self.source())
-            else:
-                # Reuse the parser's AST, then release it: we've derived
-                # everything we need from it.
-                self._code_regions = self._parser.code_regions()
-                self._parser.release_ast()
-        return self._code_regions
+        if self._parser is None:
+            return code_regions(self.source())
+        # Reuse the parser's AST, then release it: reporters find regions
+        # after analysis, so everything else we need from it is done.
+        regions = self._parser.code_regions()
+        self._parser.release_ast()
+        return regions
 
     def code_region_kinds(self) -> Iterable[tuple[str, str]]:
         return [
