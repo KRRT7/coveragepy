@@ -199,10 +199,12 @@ class LcovReporter:
         outfile = outfile or sys.stdout
 
         # ensure file records are sorted by the _relative_ filename, not the full path
-        to_report = [
-            (fr.relative_filename(), fr, analysis)
-            for fr, analysis in get_analysis_to_report(self.coverage, morfs)
-        ]
+        to_report = []
+        for fr, analysis in get_analysis_to_report(self.coverage, morfs):
+            # Find regions now, reusing the parser's AST, which lets the AST
+            # be released before we hold this file in the report list.
+            fr.code_regions()
+            to_report.append((fr.relative_filename(), fr, analysis))
         to_report.sort()
 
         for fname, fr, analysis in to_report:
